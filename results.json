@@ -1,0 +1,14 @@
+[
+  {
+    "domain": "test-domain.com",
+    "da": 22,
+    "backlinks": 8,
+    "wayback": true
+  },
+  {
+    "domain": "oldsite.net",
+    "da": 28,
+    "backlinks": 15,
+    "wayback": true
+  }
+]

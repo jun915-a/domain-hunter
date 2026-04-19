@@ -1,13 +1,7 @@
-import requests
-from bs4 import BeautifulSoup
-import time
+import csv
 import json
 from datetime import datetime
-import re
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-}
+import time
 
 TRADEMARK_BLACKLIST = {
     "apple", "google", "amazon", "microsoft", "facebook", "twitter", "meta",
@@ -15,46 +9,9 @@ TRADEMARK_BLACKLIST = {
     "nike", "adidas", "puma", "gucci", "louis", "prada", "rolex", "cartier",
     "coca", "pepsi", "starbucks", "mcdonalds", "kfc", "uber", "airbnb",
     "netflix", "spotify", "disney", "warner", "paramount", "nba", "nfl",
-    "bank", "chase", "wells", "citibank", "goldman", "jp morgan",
-    "softbank", "rakuten", "yahoo", "line", "dena", "gree", "zynga"
+    "bank", "chase", "wells", "citibank", "goldman", "softbank", "rakuten",
+    "yahoo", "line", "dena", "gree", "zynga"
 }
-
-def fetch_expired_domains(min_da=30, min_backlinks=20, pages=3):
-    candidates = []
-
-    for page in range(1, pages + 1):
-        url = f"https://www.expireddomains.net/domain-name-search/?fwhois=22&fsimilar=0&falexa=0&fda={min_da}&fmajestic=0&fpi=0&start={( page - 1) * 25}"
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=15)
-            res.raise_for_status()
-        except Exception as e:
-            print(f"[ERROR] fetch page {page}: {e}")
-            continue
-
-        soup = BeautifulSoup(res.text, "html.parser")
-        rows = soup.select("table.base1 tbody tr")
-
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) < 10:
-                continue
-            try:
-                domain = cols[0].get_text(strip=True)
-                da = int(cols[4].get_text(strip=True) or 0)
-                bl = int(cols[6].get_text(strip=True).replace(",", "") or 0)
-
-                if da >= min_da and bl >= min_backlinks and not check_trademark_risk(domain):
-                    candidates.append({
-                        "domain": domain,
-                        "da": da,
-                        "backlinks": bl,
-                    })
-            except Exception:
-                continue
-
-        time.sleep(2)
-
-    return candidates
 
 
 def check_trademark_risk(domain: str) -> bool:
@@ -65,7 +22,41 @@ def check_trademark_risk(domain: str) -> bool:
     return False
 
 
+def load_domains_from_csv(filename="domains.csv"):
+    """domains.csvから候補ドメインを読み込む"""
+    try:
+        with open(filename, "r") as f:
+            reader = csv.DictReader(f)
+            domains = []
+            for row in reader:
+                domain = row.get("domain", "").strip()
+                if domain:
+                    domains.append({
+                        "domain": domain,
+                        "da": int(row.get("da", 0) or 0),
+                        "backlinks": int(row.get("backlinks", 0) or 0),
+                    })
+            return domains
+    except FileNotFoundError:
+        print(f"[ERROR] {filename} が見つかりません")
+        return []
+
+
+def filter_domains(domains):
+    """商標チェック + 基本フィルタリング"""
+    filtered = []
+    for item in domains:
+        domain = item.get("domain")
+        if check_trademark_risk(domain):
+            print(f"  [NG] {domain} (商標リスク)")
+            continue
+        filtered.append(item)
+    return filtered
+
+
 def check_wayback(domain):
+    """Wayback Machineで過去のサイト履歴確認"""
+    import requests
     url = f"https://archive.org/wayback/available?url={domain}"
     try:
         res = requests.get(url, timeout=10)
@@ -77,28 +68,53 @@ def check_wayback(domain):
 
 
 def filter_with_wayback(candidates):
+    """Waybackチェック"""
     results = []
     for item in candidates:
         has_history = check_wayback(item["domain"])
         if has_history:
             item["wayback"] = True
             results.append(item)
-        time.sleep(1)
+            print(f"  [OK] {item['domain']} (DA:{item['da']} BL:{item['backlinks']})")
+        else:
+            print(f"  [スキップ] {item['domain']} (Wayback履歴なし)")
+        time.sleep(0.5)
     return results
 
 
 def run():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] スキャン開始")
-    print("フィルタ: DA≥30, 被リンク≥20, 商標チェック済み")
-    candidates = fetch_expired_domains(min_da=30, min_backlinks=20)
-    print(f"候補: {len(candidates)}件 → Waybackチェック中...")
-    filtered = filter_with_wayback(candidates)
+
+    # CSVから読み込み
+    domains = load_domains_from_csv("domains.csv")
+    print(f"読み込み: {len(domains)}件")
+
+    if len(domains) == 0:
+        print("\n[INFO] domains.csvにドメインを入力してください")
+        print("  フォーマット: domain,da,backlinks")
+        print("  例:")
+        print("    example.com,25,10")
+        print("    test.com,30,15")
+        return []
+
+    # 商標チェック
+    print("\n商標チェック中...")
+    filtered = filter_domains(domains)
     print(f"通過: {len(filtered)}件")
 
-    with open("results.json", "w") as f:
-        json.dump(filtered, f, ensure_ascii=False, indent=2)
+    if len(filtered) == 0:
+        return []
 
-    return filtered
+    # Waybackチェック
+    print("\nWayback履歴確認中...")
+    results = filter_with_wayback(filtered)
+    print(f"最終: {len(results)}件")
+
+    # 結果保存
+    with open("results.json", "w") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+
+    return results
 
 
 if __name__ == "__main__":
