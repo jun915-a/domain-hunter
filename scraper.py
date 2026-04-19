@@ -3,12 +3,23 @@ from bs4 import BeautifulSoup
 import time
 import json
 from datetime import datetime
+import re
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 }
 
-def fetch_expired_domains(min_da=20, min_backlinks=10, pages=3):
+TRADEMARK_BLACKLIST = {
+    "apple", "google", "amazon", "microsoft", "facebook", "twitter", "meta",
+    "tesla", "toyota", "honda", "bmw", "sony", "samsung", "lg", "panasonic",
+    "nike", "adidas", "puma", "gucci", "louis", "prada", "rolex", "cartier",
+    "coca", "pepsi", "starbucks", "mcdonalds", "kfc", "uber", "airbnb",
+    "netflix", "spotify", "disney", "warner", "paramount", "nba", "nfl",
+    "bank", "chase", "wells", "citibank", "goldman", "jp morgan",
+    "softbank", "rakuten", "yahoo", "line", "dena", "gree", "zynga"
+}
+
+def fetch_expired_domains(min_da=30, min_backlinks=20, pages=3):
     candidates = []
 
     for page in range(1, pages + 1):
@@ -32,7 +43,7 @@ def fetch_expired_domains(min_da=20, min_backlinks=10, pages=3):
                 da = int(cols[4].get_text(strip=True) or 0)
                 bl = int(cols[6].get_text(strip=True).replace(",", "") or 0)
 
-                if da >= min_da and bl >= min_backlinks:
+                if da >= min_da and bl >= min_backlinks and not check_trademark_risk(domain):
                     candidates.append({
                         "domain": domain,
                         "da": da,
@@ -44,6 +55,14 @@ def fetch_expired_domains(min_da=20, min_backlinks=10, pages=3):
         time.sleep(2)
 
     return candidates
+
+
+def check_trademark_risk(domain: str) -> bool:
+    domain_lower = domain.lower().replace("www.", "").split(".")[0]
+    for term in TRADEMARK_BLACKLIST:
+        if term in domain_lower or domain_lower in term:
+            return True
+    return False
 
 
 def check_wayback(domain):
@@ -70,7 +89,8 @@ def filter_with_wayback(candidates):
 
 def run():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] スキャン開始")
-    candidates = fetch_expired_domains(min_da=20, min_backlinks=10)
+    print("フィルタ: DA≥30, 被リンク≥20, 商標チェック済み")
+    candidates = fetch_expired_domains(min_da=30, min_backlinks=20)
     print(f"候補: {len(candidates)}件 → Waybackチェック中...")
     filtered = filter_with_wayback(candidates)
     print(f"通過: {len(filtered)}件")
